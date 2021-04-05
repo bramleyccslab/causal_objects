@@ -57,5 +57,5 @@ Causal reasoning · Generalization · Bayesian models · Inductive bias · Progr
 ## Useful links
 - [Experiment 1 demo](http://bramleylab.ppls.ed.ac.uk/experiments/bnz/magic_stones/index.html)
 - [Experiment 2 demo](http://bramleylab.ppls.ed.ac.uk/experiments/bnz/myst/p/welcome.html)
-- [Experiment 1 working repository](https://github.com/zhaobn/magic-stones) (contains experiment dev code, all raw data and model dev history; can be messy)
-- [Experiment 2 working repository](https://github.com/zhaobn/mysterious-stones) (same as above)
+- [Experiment 1 working repo](https://github.com/zhaobn/magic-stones) (contains experiment dev code, all raw data and model dev history; can be messy)
+- [Experiment 2 working repo](https://github.com/zhaobn/mysterious-stones) (same as above)
