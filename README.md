@@ -3,7 +3,7 @@
 ## Project info
 
 ### Manuscript
-How do people generalize causal relations over objects? A non-parametric Bayesian account (submitting soon)
+How do people generalize causal relations over objects? A non-parametric Bayesian account (submitted)
 
 ### Authors
 [Bonan Zhao](http://bramleylab.ppls.ed.ac.uk/member/bonan/),
