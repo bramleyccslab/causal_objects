@@ -1,0 +1,315 @@
+---
+title: "Experiment 1 Analysis"
+author: "Bonan Zhao"
+date: "10/16/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r preamble, message=FALSE, warning=FALSE}
+# Packages
+library(tidyverse)
+
+# Data sources
+load('./exp_1/data/behavioral.Rdata')
+load('./exp_1/data/model_data.Rdata')
+load('./exp_1/data/grid_preds_01.Rdata')
+df.trials=read.csv('../behavioral_data/exp1_trials.csv')
+```
+
+
+# Generalization consistency
+
+We use Cronbach's alpha to measure inter-person consistency.
+Specifically, the Kuder-Richardson Formula 21 (KR-21), a simplified version of Cronbach's alpha known to be more conservative.
+The resulting consistency measure ranges between 0 - indicating uniform spread across all selections - and 1 - indicating perfect agreement between participants.
+(See Experiment 1 Results section, pp.9-10.)
+
+
+```{r cronbach_def, message=FALSE, warning=FALSE}
+# Function to calculate Cronbach's alpha
+KR21<-function(x) {
+  # Implements Equation 13 on p.9
+  k=sum(x)
+  n=length(x)
+  p=1/n
+  rho<-(k/(k-1))*(1-(k*p*(1-p)/var(x)))
+  # Safety cap
+  rho<-min(rho, 1)
+  rho<-max(rho, 0)
+  return(rho)
+}
+
+# Prep return data frame
+consistency<-df.sels %>%
+  select(learningTaskId, sequence, trial) %>%
+  distinct()
+
+# Measure inter-person generalization consistency
+for (i in 1:nrow(consistency)) {
+  counts<-df.sels %>%
+    filter(learningTaskId==consistency[i,'learningTaskId'],
+           sequence==consistency[i,'sequence'],
+           trial==consistency[i,'trial']) %>%
+    pull(n)
+  consistency[i,'kr21']<-KR21(counts)
+  consistency[i,'cond']<-paste0('L',substr(consistency[i,'learningTaskId'],7,7))
+}
+```
+
+
+## Plots and statistical tests
+
+Task-wise consistency measure demonstrates that participants made systematic one-shot causal generalizations.
+
+```{r cronbach_test_rd, message=FALSE, warning=FALSE}
+tests = df.trials %>%
+  select(ix, condition=learningTaskId, order, trial, result=selection) %>%
+  mutate(
+    condition=as.factor(condition), 
+    order=as.factor(order), 
+    trial=as.factor(trial),
+    result=as.factor(result))
+
+fisher.test(table(tests$trial, tests$result), simulate.p.value=TRUE)
+```
+
+
+Generalizations were more consistent overall under near-first transfer,
+compared with far-first transfer
+(**Fig. 4A**: Cronbach's alpha per learning condition)
+
+```{r cronbach_plot_cond, message=FALSE, warning=FALSE}
+# Prep data
+agg_con<-consistency %>%
+  filter(sequence!='combined') %>%
+  mutate(sequence=ifelse(sequence=='default', 'near', 'far'),
+         condition=paste0('A',substr(learningTaskId,7,7))) %>%
+  mutate(sequence=factor(sequence, levels=c('near','far'))) %>%
+  select(condition, sequence, trial, kr21) %>%
+  group_by(condition, sequence) %>%
+  summarise(mean=mean(kr21), sd=sd(kr21)) 
+
+ppt<-df.sels %>%
+  filter(sequence!='combined') %>%
+  group_by(learningTaskId, sequence) %>%
+  summarise(n=sum(n)/15) %>%
+  mutate(sequence=ifelse(sequence=='default', 'near', 'far'),
+         condition=paste0('A',substr(learningTaskId,7,7)))  %>%
+  mutate(sequence=factor(sequence, levels=c('near','far'))) %>%
+  ungroup() %>%
+  select(condition, sequence, n)
+
+agg_con %>%
+  left_join(ppt, by=c('condition', 'sequence')) %>%
+  mutate(se=sd/sqrt(n)) %>%
+  ggplot(aes(x=sequence, y=mean, fill=sequence)) + 
+  geom_bar(stat='identity') +
+  geom_errorbar(aes(ymin=mean, ymax=mean+se), width=0.2) +
+  facet_grid(~condition) +
+  theme_classic() +
+  scale_fill_brewer(palette='Paired') +
+  labs(x='', fill='', y='') +
+  theme(strip.background = element_rect(colour=NA, fill=NA),
+        panel.border = element_rect(fill = NA, color = "black"))
+
+```
+
+
+```{r cronbach_plot_cond_test, message=FALSE, warning=FALSE}
+near_kr<-consistency %>% filter(sequence=='default') %>% pull(kr21)
+far_kr<-consistency %>% filter(sequence=='reverse') %>% pull(kr21)
+t.test(near_kr, far_kr, paired = T)
+```
+
+
+Participants generalized less consistently when the learning task involved new colors or new shapes (**Fig. 4B**: Cronbach's alpha per learning data types).
+For learning scenes A1, A3, and A5, where effect states *match* agents' features, overall consistency was high.
+Learning scenes A2, A4, and A6, where effects involved brand *new* values,
+consistency was lower, differing significantly from the *match* group.
+
+```{r cronbach_plot_type, message=FALSE, warning=FALSE}
+# Pull out data
+c.data<-consistency %>% filter(sequence!='combined')
+
+# Plot match (A1, A3, A5) vs. new (A2, A4, A6), p.10
+c.data %>%
+  mutate(effect=ifelse(learningTaskId %in% c('learn01', 'learn03', 'learn05'), 'match', 'new')) %>%
+  ggplot(aes(x=kr21, fill=effect)) +
+  geom_density(alpha=0.8) +
+  labs(x="Cronbach's alpha", y='', fill='') +
+  scale_fill_brewer(palette='Paired') +
+  theme_classic()
+```
+
+```{r cronbach_plot_type_test, message=FALSE, warning=FALSE}
+exi_kr<-c.data %>% filter(learningTaskId %in% c('learn01', 'learn03', 'learn05')) %>% pull(kr21)
+new_kr<-c.data %>% filter(learningTaskId %in% c('learn02', 'learn04', 'learn06')) %>% pull(kr21)
+
+t.test(exi_kr, new_kr, paired = T)
+```
+
+
+Color and shape changes were generalized to different extents despite these features appearing in symmetric and counterbalanced contexts in the task (**Fig. 4C**: Cronbach's alpha per feature change).
+Shape changes (A1, A2) induced more homogeneous predictions,
+compared to color changes (A3, A4).
+
+```{r cronbach_plot_feat, message=FALSE, warning=FALSE}
+c.data %>%
+  filter(!(learningTaskId %in% c('learn05','learn06'))) %>%
+  mutate(feat=ifelse(learningTaskId %in% c('learn01', 'learn02'), 'shape', 'color')) %>%
+  ggplot(aes(x=kr21, fill=feat)) +
+  geom_density(alpha=0.8) +
+  labs(x="Cronbach's alpha", y='', fill='') +
+  scale_fill_brewer(palette='Paired') +
+  theme_classic()
+```
+
+```{r cronbach_plot_feat_test, message=FALSE, warning=FALSE}
+sha_kr<-c.data %>% filter(learningTaskId %in% c('learn01', 'learn02')) %>% pull(kr21)
+col_kr<-c.data %>% filter(learningTaskId %in% c('learn03', 'learn04')) %>% pull(kr21)
+
+t.test(sha_kr,col_kr,paired = T)
+```
+
+
+# Models
+
+See `./exp_1` folder for model implementations, optimized parameters, and BIC values.
+
+
+
+Plot behavioral data:
+
+```{r heatmap_mturk, message=FALSE, warning=FALSE}
+textsize = 15
+
+# Plot behavioral data
+ppt_near<-df.sels %>%
+  filter(sequence=='default') %>%
+  mutate(condition=paste0('A',substr(learningTaskId,7,7)), 
+         object=selection, prob=freq, mname='ppt_near',
+         sequence=ifelse(sequence=='default', 'near', 'far')) %>%
+  select(condition, trial, object, prob, mname, sequence)
+
+ppt_far<-df.sels %>%
+  filter(sequence=='reverse') %>%
+  mutate(condition=paste0('A',substr(learningTaskId,7,7)), 
+         object=selection, prob=freq, mname='ppt_far',
+         sequence=ifelse(sequence=='default', 'near', 'far')) %>%
+  select(condition, trial, object, prob, mname, sequence)
+
+beh<-rbind(ppt_near, ppt_far) %>%
+  mutate(sequence=factor(sequence, levels=c('near', 'far'))) %>%
+  ggplot(aes(x=object, y=trial, fill=prob)) +
+  geom_tile() +
+  labs(x='', y='task', fill='') + #title='Behavioral data'
+  scale_y_continuous(trans="reverse", breaks=c(1,5,10,15)) +  # breaks=seq(15)
+  scale_fill_gradient(low='white', high='#293352') +
+  theme_classic() +
+  theme(strip.background = element_rect(colour=NA, fill=NA),
+        panel.border = element_rect(fill = NA, color = "black"),
+        text = element_text(size=textsize),
+        strip.text.y = element_blank()
+        ) +
+  facet_grid(sequence~condition)
+
+beh
+```
+
+
+
+
+Plot best-fitted LoCaLaPro model:
+
+```{r heatmap_process, message=FALSE, warning=FALSE}
+proc_near<-exp1.localapro %>%
+  filter(sequence=='near') %>%
+  mutate(condition=paste0('A',substr(learningTaskId,7,7)), 
+         mname='process_near') %>%
+  select(condition, trial, object, prob=prob_s, mname, sequence)
+
+proc_far<-exp1.localapro %>%
+  filter(sequence=='far') %>%
+  mutate(condition=paste0('A',substr(learningTaskId,7,7)), mname='process_far') %>%
+  select(condition, trial, object, prob=prob_s, mname, sequence)
+
+fit<-rbind(proc_near, proc_far) %>%
+  mutate(sequence=factor(sequence, levels=c('near', 'far'))) %>%
+  ggplot(aes(x=object, y=trial, fill=prob)) +
+  geom_tile() +
+  labs(x='', y='', fill='') + # title='Process model: fitted'
+  scale_y_continuous(trans="reverse", breaks=c(1,5,10,15)) +
+  scale_fill_gradient(low='white', high='#293352') +
+  theme_classic() +
+  theme(strip.background = element_rect(colour=NA, fill=NA),
+        panel.border = element_rect(fill = NA, color = "black"),
+        text = element_text(size=textsize)
+        ) +
+  facet_grid(sequence~condition)
+fit
+```
+
+
+
+Plot model with small alpha values:
+
+```{r heatmap_small, message=FALSE, warning=FALSE}
+order_preds<-grid_preds_01[[1]]
+small<-order_preds %>%
+  mutate(condition=paste0('A',substr(learningTaskId,7,7)), prob=sim/10000,
+         sequence=factor(sequence, levels=c('near', 'far'))) %>%
+  ggplot(aes(x=object, y=trial, fill=prob)) +
+  geom_tile() +
+  labs(x='', y='task', fill='') + #  title='Process model: alpha = 0.01'
+  scale_y_continuous(trans="reverse", breaks=c(1,5,10,15)) +
+  scale_fill_gradient(low='white', high='#293352') +
+  theme_classic() +
+  theme(strip.background = element_rect(colour=NA, fill=NA),
+        panel.border = element_rect(fill = NA, color = "black"),
+        text = element_text(size=textsize),
+        strip.text.x = element_blank(),
+        strip.text.y = element_blank()
+        ) +
+  facet_grid(sequence~condition)
+small
+```
+
+
+
+
+Plot model with large alpha values:
+
+```{r heatmap_large, message=FALSE, warning=FALSE}
+rand_preds<-grid_preds_01[[15]]
+large<-rand_preds %>%
+  mutate(condition=paste0('A',substr(learningTaskId,7,7)), prob=sim/10000,
+         sequence=factor(sequence, levels=c('near', 'far'))) %>%
+  ggplot(aes(x=object, y=trial, fill=prob)) +
+  geom_tile() +
+  labs(x='', y='', fill='') + #title='Process model: alpha = 8'
+  scale_y_continuous(trans="reverse", breaks=c(1,5,10,15)) +
+  scale_fill_gradient(low='white', high='#293352') +
+  theme_classic() +
+  theme(strip.background = element_rect(colour=NA, fill=NA),
+        panel.border = element_rect(fill = NA, color = "black"),
+        text = element_text(size=textsize),
+        strip.text.x = element_blank()) +
+  facet_grid(sequence~condition)
+large  
+```
+
+
+
+
+
+
+
+
+
+
+
+
