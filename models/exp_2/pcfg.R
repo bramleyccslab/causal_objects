@@ -1,10 +1,15 @@
 
-source('shared.R')
+library(tidyverse)
+library(stringr)
+source('models/exp_2/functions/shared.R')
 
 ################################################################
-# Generate universal effects
+# PCFG for Experiment 2
+# See Section "Causal Laws" (pp.4-5) and note for Experiment 2 (lines 628-630, p.19)
 generate_hypo<-function() {
   pcfg<-function(s, role) {
+    # In correspondence to Table 1, p.4:
+    # F: (Bind) feature, X: Relative reference, L: Relation, Y: Reference , T: Target, i.e., Absolute or Relative reference
     s<-gsub('S', sample(c('', 'and(S, S)', 'F(X)LYT'), 1), s)
     
     x_vals<-if (role=='cause') c('A', 'R') else 'M'
@@ -32,7 +37,8 @@ generate_hypo<-function() {
 }
 
 ################################################################
-# Universal evaluation
+# Evaluate causal functions 
+# Equation 3, p.5
 universal_effects<-function(hypo, data) {
   # Format input data
   if (typeof(data)!='list') {
@@ -67,53 +73,8 @@ universal_effects<-function(hypo, data) {
 }
 
 ################################################################
-# Group by causal equivalence
-#load('effects.Rdata')
-some_hypos<-effects[seq(10)]
-data_strs<-all_data_str
-
-#list_info<-data.frame(current=0)
-results<-list()
-for (hi in 1:length(some_hypos)) {
-  h<-some_hypos[[hi]]
-  results[[h]]<-list()
-  for (d in data_strs) {
-    x<-universal_effects(h, d)
-    names(x)<-paste0(d, ',', names(x))
-    results[[h]]<-c(results[[h]], x)
-  }
-  # # logging  
-  # list_info$current<-hi
-  # write.csv(list_info, 'list_info.csv')
-}
-#save(results, file='results_raw.Rdata')
-
-ut<-unique(results)
-ut_info<-data.frame(total=length(ut))
-
-group_hypos<-function(i, source) {
-  f<-Filter(function(x){sum(unlist(x)==unlist(ut[[i]]))==length(all_objects)*length(data_strs)}, source)
-  fn<-names(f)
-  return(data.frame(shortest=(fn[which(nchar(fn)==min(nchar(fn)))])[1], 
-                    n=length(f), 
-                    hypos=I(list(names(f)))))
-}
-
-df<-group_hypos(1, results)
-for (i in 2:length(ut)) {
-  # logging current line number
-  # ut_info$current<-i
-  # write.csv(ut_info, 'ut_info.csv')
-  # save up
-  df<-rbind(df, group_hypos(i, results))
-  # save(df, file='effects_grouped.Rdata')
-}
-
-
-################################################################
-# Prior
-library(stringr)
-
+# Calculate priors, Equation 1. p.5
+# Equation 1, p.5 
 pcfg_prior<-function(hypo) {
   get_prior<-function(x) {
     # count ands
@@ -140,39 +101,7 @@ pcfg_prior<-function(hypo) {
   return(get_prior(h$cause)*get_prior(h$effect))
 }
 
-
-effects_grouped<-effects_grouped%>%select(shortest, n, hypos)
-effects_grouped$prior<-normalize(effects_grouped$n)
-save(effects_grouped, file='../data/effects_grouped.Rdata')
-
-# Add posterior dists to faster the sampler
-tasks<-read.csv('../data/pilot_setup.csv')
-hypos<-df.effects.grouped%>%select(hypo=shortest, prior)
-
-get_hypo_posts<-function(cond, task_source=tasks, hypo_source=hypos) {
-  task_obs<-tasks%>%filter(group==cond&phase=='learn')%>%select(agent, recipient, result)
-  df<-hypos
-
-  for (i in seq(nrow(task_obs))) {
-    d<-paste(task_obs[i,], collapse=',')
-    post_col<-paste0('post_',i)
-    df[,post_col]<-mapply(get_likeli, df$hypo, rep(d, nrow(df))) # likelihoods
-    df[,post_col]<-df[,post_col]*df$prior
-    df[,post_col]<-normalize(df[,post_col])
-  }
-  
-  df$group=cond
-  return(df)
-}
-
-x<-get_hypo_posts('A1')
-for (c in paste0('A', seq(2,4))) x<-rbind(x, get_hypo_posts(c))
-
-df.effects.grouped<-effects_grouped
-df.effects.posts<-x
-save(df.effects.grouped, df.effects.posts, file='../data/effects_grouped.Rdata')
-
-
+################################################################
 # systematically generate basic ones
 g_edges<-c()
 for (r in c('==', '!=', '>', '<')) {
@@ -199,7 +128,6 @@ for (e in g_edges) {
   }
 }
 
-
 # unify them, get prior, clean up
 hypos<-c(g_edges, g_shades, combos)
 df.hypos<-data.frame(hypo=hypos) %>%
@@ -209,7 +137,7 @@ df.hypos$prior<-normalize(df.hypos$prior)
 
 
 # Learning: get posterior
-tasks<-read.csv('./tasks.csv')
+tasks<-read.csv('models/exp_2/data/tasks.csv')
 
 fetch_task<-function(group_name, phase_name, trial_id, type='list', source=tasks) {
   task_data<-source%>%
@@ -248,7 +176,93 @@ for (i in 2:4) {
   df.posts<-df.posts%>%left_join(post,by='hypo')
 }
 df.hypos<-df.hypos%>%left_join(df.post, by='hypo')
-save(df.hypos, df.posts, file='hypos.Rdata')
+save(df.hypos, df.posts, file='models/exp_2/data/hypos.Rdata')
+
+################################################################
+# Sanity check (not included in paper, but fun to check for interested readers)
+# We can first generate a large sample (N=100,000) of causal functions,
+# and then grouped them by causal equivalence:
+#   if two causal functions make the same predictions under all the possible configurations for agent-recipient object pairs, 
+#   then we call these two causal functions causally equivalent within this experiment setup.}
+
+# Generate a large sample, lines 630-631, p.19
+effects<-list()
+for (i in seq(100000)) effects[[i]]<-generate_hypo()
+effects<-unique(effects)
+save(effects, file='effects.Rdata')
+
+# Group by causal equivalence, lines 631-633, p.19
+some_hypos<-effects
+data_strs<-all_data_str
+results<-list()
+for (hi in 1:length(some_hypos)) {
+  h<-some_hypos[[hi]]
+  results[[h]]<-list()
+  for (d in data_strs) {
+    x<-universal_effects(h, d)
+    names(x)<-paste0(d, ',', names(x))
+    results[[h]]<-c(results[[h]], x)
+  }
+}
+
+# Clear up redundancy
+ut<-unique(results)
+ut_info<-data.frame(total=length(ut))
+
+# Check predictions
+group_hypos<-function(i, source) {
+  f<-Filter(function(x){sum(unlist(x)==unlist(ut[[i]]))==length(all_objects)*length(data_strs)}, source)
+  fn<-names(f)
+  return(data.frame(shortest=(fn[which(nchar(fn)==min(nchar(fn)))])[1], 
+                    n=length(f), 
+                    hypos=I(list(names(f)))))
+}
+
+df<-group_hypos(1, results)
+for (i in 2:length(ut)) {
+  # logging current line number
+  # ut_info$current<-i
+  # write.csv(ut_info, 'ut_info.csv')
+  # save up
+  df<-rbind(df, group_hypos(i, results))
+  save(df, file='effects_grouped.Rdata')
+}
+
+effects_grouped<-effects_grouped%>%select(shortest, n, hypos)
+effects_grouped$prior<-normalize(effects_grouped$n)
+save(effects_grouped, file='../data/effects_grouped.Rdata')
+
+# Add posterior dists to faster the sampler
+tasks<-read.csv('../data/pilot_setup.csv')
+hypos<-df.effects.grouped%>%select(hypo=shortest, prior)
+
+get_hypo_posts<-function(cond, task_source=tasks, hypo_source=hypos) {
+  task_obs<-tasks%>%filter(group==cond&phase=='learn')%>%select(agent, recipient, result)
+  df<-hypos
+  
+  for (i in seq(nrow(task_obs))) {
+    d<-paste(task_obs[i,], collapse=',')
+    post_col<-paste0('post_',i)
+    df[,post_col]<-mapply(get_likeli, df$hypo, rep(d, nrow(df))) # likelihoods
+    df[,post_col]<-df[,post_col]*df$prior
+    df[,post_col]<-normalize(df[,post_col])
+  }
+  
+  df$group=cond
+  return(df)
+}
+
+x<-get_hypo_posts('A1')
+for (c in paste0('A', seq(2,4))) x<-rbind(x, get_hypo_posts(c))
+
+df.effects.grouped<-effects_grouped
+df.effects.posts<-x
+save(df.effects.grouped, df.effects.posts, file='../data/effects_grouped.Rdata')
+
+
+
+
+
 
 
 
