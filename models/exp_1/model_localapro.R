@@ -3,62 +3,75 @@ rm(list=ls())
 set.seed(231)
 
 library(tidyverse)
-tasks = read.csv('tasks.csv')
-load('behavioral.Rdata')
-load('hypos.Rdata')
-source('shared.R')
+source('models/exp_1/shared.R') # Helper functions
+tasks = read.csv('models/exp_1/data/tasks.csv') # Experiment 1 task setup
 
+load('models/exp_1/data/hypos.Rdata')
+df.hypos = exp1.hypos
+likelis = exp1.likelihoods
+
+load('models/exp_1/data/behavioral.Rdata')
 ppt_data<-rbind(
   (df.sels%>%filter(sequence=='default')%>%mutate(condition='near')%>%select(learningTaskId, condition, trial, selection, n)),
   (df.sels%>%filter(sequence=='reverse')%>%mutate(condition='far')%>%select(learningTaskId, condition, trial, selection, n))
 ) %>%
   select(learningTaskId, sequence=condition, trial, object=selection, n)
-load('hypos.Rdata')
 df.hypos$hid<-seq(1:nrow(df.hypos))
+N=10000 # Number of Gibbs iterations
 
-N=10000
 
 # Build up the process
+# The code below in the sim_preds function implements the Gibbs sampler for our LoCaLaPro model
+# See lines 404-427, pp.12-13
 sim_preds<-function(lid, seq, alpha, beta, gamma) {
   preds<-vector("list", 15) # store prediction for each trial
-  cats<-list() 
+  cats<-list() # list of categories
   cat_unit<-if (gamma==1|gamma==0) 1 else 2
-  cat_funcs<-list()
-  cond<-paste0('learn0',lid)
+  cat_funcs<-list() # causal functions assigned to categories
+  cond<-paste0('learn0',lid) # lid: learning condition ID
   postcol<-paste0('post_l', lid)
-  ld<-tasks %>% filter(phase=='learn', learningTaskId==cond) %>% select(agent, recipient, result) %>% as.list()
+  ld<-tasks %>% # learn data
+    filter(phase=='learn', learningTaskId==cond) %>% 
+    select(agent, recipient, result) %>% 
+    as.list()
   lls<-likelis[[cond]]
-  # Assign ld to first cat
+  # Assign ld to the first cat, line 2 in Algorithm 1, p.12
   cats[[1]]<-Map('+', read_data_feature(ld, gamma), init_feat_dist(beta))
-  # Sample a function for it from posterior
+  # Sample a function for it from posterior, line 3 in Algorithm 1, p.12
   func_id<-sample(df.hypos$hid, 1, prob=df.hypos[,postcol])
+  # Record this category, line 4 in Algorithm 1, p.12
   cat_funcs[[1]]<-c(func_id, df.hypos[func_id, 'hypo'])
-  # Greedily assign categories
+  # Greedily assign categories, lines 5-15 in in Algorithm 1, p.12
   for (i in seq(15)) {
+    # Read the correct trial data given generalization task sequence condition
     tid<-if (seq=='near') i else 16-i
     td<-tasks %>% filter(phase=='gen', learningTaskId==cond, trial==tid) %>% select(agent, recipient) %>% as.list()
     td_feats<-read_data_feature(td, gamma)
     th_preds<-lls[[tid]]
     # Check the probability of belonging to each existing category
+    # Line 6 in Algorithm 1, p.12
     unnorm_probs<-vector()
     for (ci in (1:length(cats))) {
-      # Dir likelihoods
       cat<-cats[[ci]]
+      # Feature similarity, Equation 7, p.6
       dir_join<-Reduce('+', Map('*', td_feats, cat))/Reduce('+',cat)
+      # CRP for group size prior, Equation 6, p.6
       cat_size<-(Reduce('+', cat)-beta*6)/cat_unit
-      crp_join<-cat_size/(i+alpha) # 1st task is actually the 2nd entity
+      crp_join<-cat_size/(i+alpha) 
+      # Equation 5, p.6
       unnorm_probs<-c(unnorm_probs, dir_join*crp_join)
     }
-    # Or creating a new category
+    # Or creating a new category, lines 11-14 in Algorithm 1, p.12
     cat_new<-Map('+', init_feat_dist(beta), td_feats)
     dir_new<-Reduce('+', Map('*', td_feats, cat_new))/Reduce('+',cat_new)
     crp_new<-alpha/(i+alpha)
     unnorm_probs<-c(unnorm_probs, dir_new*crp_new)
-    # Assign cat accordingly
+    # Assign categories accordingly
     assigned_ci<-sample(1:length(unnorm_probs), 1, prob=unnorm_probs)
     if (assigned_ci>length(cats)) {
       cats[[assigned_ci]]<-cat_new
-      # For newly-created cat, sample a function for it
+      # For newly-created cat, sample a function from the prior
+      # Line 12 in Algorithm 1, p.12
       func_id<-sample(df.hypos$hid, 1, prob=df.hypos$prior)
       cat_funcs[[assigned_ci]]<-c(func_id, df.hypos[func_id, 'hypo'])
     } else {
@@ -72,6 +85,7 @@ sim_preds<-function(lid, seq, alpha, beta, gamma) {
 }
 
 # Get simulation results
+# Equation 11-12, pp.7-8
 sim_all<-function(alpha, beta, gamma, N) {
   model.proc<-expand.grid(
     learningTaskId=paste0('learn0',seq(6)), 
@@ -88,6 +102,7 @@ sim_all<-function(alpha, beta, gamma, N) {
   s='near'
   cond<-paste0('learn0', i)
   while (counter<N) {
+    # Run Gibbs sampler
     sims<-sim_preds(i, s, alpha, beta, gamma)
     for (x in 1:length(sims)) {
       rownum<-which(
@@ -103,6 +118,7 @@ sim_all<-function(alpha, beta, gamma, N) {
 }
 
 # Fit softmax
+# Lines 322-329, p.9
 full_model<-function(par, mdata) {
   for (i in seq(6)) {
     for (s in c('near', 'far')) {
@@ -121,7 +137,9 @@ full_model<-function(par, mdata) {
   return(-sum(mdata$n*log(mdata$prob_s)))
 }
 
+
 # Grid search
+# Lines 441-453, p.13
 alphas<-c(seq(from=1,to=10,by=.5), 2^(4:10))
 betas<-c(seq(0,1,.1), 2^(1:10))
 gammas<-c(0,.25,.5,.75,1)

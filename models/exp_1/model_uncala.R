@@ -2,21 +2,24 @@
 rm(list=ls())
 library(tidyverse)
 
-tasks = read.csv('tasks.csv')
-load('behavioral.Rdata')
-load('hypos.Rdata')
-source('shared.R')
+tasks = read.csv('models/exp_1/data/tasks.csv') # Experiment 1 task setup
+load('models/exp_1/data/behavioral.Rdata')
+load('models/exp_1/data/hypos.Rdata')
+source('models/exp_1/shared.R') # Helper functions
 
+# No order difference, use the combined mturk data
 df.sels = df.sels %>% filter(sequence=='combined')
 df.hypos = exp1.hypos
 likelis = exp1.likelihoods
 
-# Posterior predictives
+# Posterior predictives placeholder
 model.uni<-data.frame(
   learningTaskId=character(0), trial=numeric(0),
   object=character(0), prob=numeric(0)
 )
 
+# Implementation of the UnCaLa model
+# Lines 384-390, p. 12
 for (i in seq(6)) {
   cond<-paste0('learn0', i)
   post_col<-paste0('post_l',i)
@@ -34,6 +37,7 @@ for (i in seq(6)) {
 }
 
 # Fit softmax
+# Equation 14 and lines 429-433, pp.11 & 13
 fit_softmax<-function(par) {
   softed<-data.frame(
     learningTaskId=character(0),
@@ -60,5 +64,7 @@ fit_softmax<-function(par) {
 }
 
 out<-optim(par=0, fn=fit_softmax, method='Brent', lower=0, upper=100)
+out$par # 6.95571
+out$value # 2760.672
 exp1.uncala = model.uni
 

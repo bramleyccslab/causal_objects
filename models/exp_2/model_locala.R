@@ -1,25 +1,29 @@
 
-gamma=0
+# Load libraries, helpers and data
+source('models/exp_2/functions/shared.R')
+source('models/exp_2/functions/gibbs.R')
+source('models/exp_2/functions/preds.R')
+load('models/exp_2/data/hypos.Rdata')
+load('models/exp_2/data/mturk_main.Rdata')
+tasks<-read.csv('models/exp_2/data/tasks.csv')
+n_learn_obs<-length(unique((tasks%>%filter(phase=='learn'))$task))
+n_gen_obs<-length(unique((tasks%>%filter(phase=='gen'))$task))
+
+# Grid search setting
 alphas<-c(1:10, 2^(4:10))
 betas<-c(seq(0,1,.1), 2^(1:10))
+gammas<-c(0,0.25,0.5,0.75,1)
 set.seed(231)
 
+# Gibbs sampler setting
 drop<-500
 slice<-1
 iter<-10000
 softmax_base<-''
 
-source('shared.R')
-source('gibbs.R')
-source('preds.R')
-load('hypos.Rdata')
-load('mturk_main.Rdata')
-tasks<-read.csv('tasks.csv')
-n_learn_obs<-length(unique((tasks%>%filter(phase=='learn'))$task))
-n_gen_obs<-length(unique((tasks%>%filter(phase=='gen'))$task))
-
+# Set up result objects
 default<-expand.grid(condition=paste0('A',1:4), trial=1:16, result=all_objects, stringsAsFactors=F)
-counts<-df.tw %>%
+counts<-df.tw %>% # Mturk data, used for model fitting
   filter(phase=='gen'&grepl('gen', sid)) %>%
   mutate(trial=as.numeric(substr(sid,8,9)), result=as.character(result)) %>%
   select(ix, condition, trial, result) %>%
@@ -31,24 +35,25 @@ counts<-df.tw %>%
   mutate(count=ifelse(is.na(count), 0, count)) %>%
   select(group=condition, trial, object=result, count)
 
-# Set up result objects
-dp_raw_preds<-list()
-dp_grid<-data.frame(
+dp_raw_preds<-list() # Place holder for model predictions without softmax
+dp_grid<-data.frame( # Place holder for grid search results
   id=numeric(0), alpha=numeric(0), beta=numeric(0), gamma=numeric(0), 
   raw_ll=numeric(0), fitted_base=numeric(0), fitted_ll=numeric(0)
 )
 
-full_grid<-data.frame(id=numeric(0), alpha=numeric(0), beta=numeric(0))
-n=1
+# Grid for parameter values
+full_grid<-data.frame(id=numeric(0), alpha=numeric(0), beta=numeric(0), gamma=numeric(0))
+n = 1
 for (a in alphas) {
   for (b in betas) {
     full_grid[n,'id']<-n
     full_grid[n,'alpha']<-a
     full_grid[n,'beta']<-b
-    n=n+1
+    n = n+1
   }
 }
 
+gamma = 1 # See line 137-141 in this script for various gamma values
 for (n in 1:nrow(full_grid)) {
   a = full_grid[n, 'alpha']
   b = full_grid[n, 'beta']
@@ -58,6 +63,7 @@ for (n in 1:nrow(full_grid)) {
   dp_grid[n, 'beta']<-b
   dp_grid[n, 'gamma']<-gamma
   
+  # Logging on server
   log<-data.frame(nth=n, alpha=a, beta=b)
   write.csv(log, file='dp_current')
 
@@ -69,11 +75,13 @@ for (n in 1:nrow(full_grid)) {
   # Get categories & make predictions
   for (c in 1:4) {
     cond<-paste0('A', c)
+    # See functions/gibbs.R
     x<-run_gibbs_sampler(cond, gamma, a, b, iter, F)
     cats<-read_cats(x[[1]], base=softmax_base, burn_in=drop, thinning=slice)
     func_preds<-prep_preds(x[[2]], cond)
-    preds<-rbind(preds,
-                 get_cond_preds(cond, cats, func_preds, a, b, gamma))
+    preds<-rbind(
+      preds,
+      get_cond_preds(cond, cats, func_preds, a, b, gamma))
   }
   dp_raw_preds[[n]]<-preds
 
@@ -105,8 +113,9 @@ for (n in 1:nrow(full_grid)) {
   out<-optim(par=0, fn=data_likeli, method='Brent', lower=0, upper=100)
   dp_grid[n, 'fitted_base']<-out$par
   dp_grid[n, 'fitted_ll']<-out$value
-
-  save(dp_grid, dp_raw_preds, file='../results/dp.Rdata')
+  
+  # Checkout lines 136-141 in this script for naming suggestions
+  save(dp_grid, dp_raw_preds, file='../results/dpa.Rdata')
 }
 
 # Put model fit results together
@@ -123,8 +132,9 @@ get_model_fits<-function(df, g) {
   return(data)
 }
 
-model_fits<-get_model_fits(dpa_grid_2, 1)
-model_fits<-rbind(model_fits, get_model_fits(dpr_grid_2, 0))
+# Remember to update gamma value on line 56 in this script to generate each required data frame
+model_fits<-get_model_fits(dpa_grid, 1)
+model_fits<-rbind(model_fits, get_model_fits(dpr_grid, 0))
 model_fits<-rbind(model_fits, get_model_fits(dp25_grid, .25))
 model_fits<-rbind(model_fits, get_model_fits(dp50_grid, .5))
 model_fits<-rbind(model_fits, get_model_fits(dp75_grid, .75))
@@ -133,6 +143,7 @@ model_fits<-model_fits %>% arrange(id)
 # Put together raw predictions
 model_preds<-vector('list', length=nrow(model_refs))
 
+# Perhaps omitted stuff: load each 5 data files in turn and append them into this one big object
 for (i in 1:length(dpa_raw_preds_2)) {
   id<-model_fits%>%filter(gamma==1, oid==i) %>% pull(id)
   model_preds[[id]]<-dpa_raw_preds_2[[i]]
@@ -152,4 +163,4 @@ for (i in 1:length(dp25_raw_preds)) {
 }
 
 # Save data
-save(model_refs, model_fits, model_preds, file='model_locala.Rdata')
+save(model_refs, model_fits, model_preds, file='models/exp_2/data/model_locala.Rdata')

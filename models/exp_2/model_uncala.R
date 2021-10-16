@@ -1,10 +1,12 @@
 
+# Import libraries, helpers, and data
 library(tidyverse)
-source('./shared.R')
-load('./hypos.Rdata')
-tasks<-read.csv('../data/setup/main.csv')
+source('models/exp_2/functions/shared.R')
+load('models/exp_2/data/hypos.Rdata')
+tasks<-read.csv('models/exp_2/data/tasks.csv')
 
-# Helper functions
+################################################################
+# More helper functions
 fetch_task<-function(group_name, phase_name, trial_id, type='list', source=tasks) {
   task_data<-source%>%
     filter(condition==group_name&phase==phase_name&task==trial_id)%>%
@@ -32,7 +34,10 @@ get_one_gen_pred<-function(group_name, trial_id, learn_post) {
                     object=all_objects, pred=normalize(result)))
 }
 
-# Get generalization predictions 
+
+################################################################
+# Get generalization predictions from learning posteriors
+# Same idea as in lines 384-390, p.12, but with Experiment 2 learning posterior (of causal functions/hypos)
 ce_preds<-data.frame(group=character(0), phase=character(0), trial=numeric(0), pred=character(0), pred=numeric(0))
 for (i in 2:4) {
   group_name=paste0('A', i)
@@ -47,7 +52,7 @@ ce_preds<-ce_preds%>%mutate(source='causal_grouped')%>%select(group, trial, obje
 ce_preds$object<-as.character(ce_preds$object)
 exp2.uncala<-ce_preds
 
-# Fit a softmax and check likelihood
+# Fit a softmax and check likelihood, lines 337-383, pp.11-12
 baseline_ll<-nrow(df.sw)*16*log(1/20)
 
 counts<-df.tw %>%
@@ -68,8 +73,9 @@ fit_ll<-function(b, data, type='fit') {
   for (c in 1:4) {
     for (i in 1:16) {
       if (!(c==1 & i==1)) {
-        softed<-rbind(softed, 
-                      filter(data, group==paste0('A',c), trial==i)%>%mutate(soft=softmax(prob, b)))
+        softed<-rbind(
+          softed, 
+          filter(data, group==paste0('A',c), trial==i)%>%mutate(soft=softmax(prob, b)))
       }
     }
   }
@@ -80,7 +86,21 @@ fit_ll<-function(b, data, type='fit') {
   }
 }
 fit_ll(1, counts)
-# 101*16*log(1/20) # -4841.103
+
 out<-optim(par=0, fn=fit_ll, data=counts, method='Brent', lower=0, upper=100)
 out$par #3.19
 out$value #3706.359
+
+# Random baseline
+101*16*log(1/20) # -4841.103
+
+
+
+
+
+
+
+
+
+
+

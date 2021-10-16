@@ -1,5 +1,5 @@
 
-# Helpers ####
+# Helpers for getting predictions from causal functions 
 read_cats<-function(states_source, burn_in=0, thinning=1, base='') {
   df<-data.frame(matrix(unlist(states_source), nrow=length(states_source), byrow=T))
   # Burn in: filter out first n samples

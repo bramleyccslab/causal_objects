@@ -23,10 +23,11 @@ run_gibbs_sampler<-function(cond, grouping, alpha, beta, limit, logging=T, hypo_
   
   # Pre-calculated values
   nobs<-nrow(task_obs)
-  join_new<-alpha/(nobs-1+alpha)
+  join_new<-alpha/(nobs-1+alpha) # CRP, Equation 6, p.6
   feats<-list()
   for (i in seq(nobs)) feats[[i]]<-read_data_feature(as.list(task_obs[i,]), grouping)
   # Helper function that calculates mean-feature similarity using feats
+  # Equation 7, lines 236-248, pp.6-7
   dir_likeli<-function(ob_idx, cat_obs_idx) {
     cat_feat<-init_feat_dist(beta)
     for (i in cat_obs_idx) cat_feat<-Map('+', cat_feat, feats[[i]])
@@ -40,7 +41,7 @@ run_gibbs_sampler<-function(cond, grouping, alpha, beta, limit, logging=T, hypo_
   print(paste0('Start sampling ', limit, ' iterations of ', cond))
   start_sampler<-Sys.time()
   
-  # Initalization
+  # Initialization
   state<-rep('c1', nobs)
   func_refs[['c1']]<-sample(hypos$hypo, 1, prob=hypos$prior)
 
@@ -54,7 +55,7 @@ run_gibbs_sampler<-function(cond, grouping, alpha, beta, limit, logging=T, hypo_
     
     other_idx<-setdiff(seq(nobs), to_update)
     
-    # sample new function(s) for this obs from conditional probablity
+    # sample new function(s) for this obs from conditional probability
     post_col<-paste0('post_',to_update)
     funcs_pool<-hypos$hypo[which(hypos[,post_col]>0)]
     funcs_post<-hypos[which(hypos[,post_col]>0), post_col]
@@ -62,7 +63,7 @@ run_gibbs_sampler<-function(cond, grouping, alpha, beta, limit, logging=T, hypo_
     new_funcs<-sample(funcs_pool, 1, prob=funcs_post)
     new_cats<-c()
     
-    # whether the sampled func belongs to an existing category
+    # whether the sampled function belongs to an existing category
     for (f in unique(new_funcs)) {
       checks<-sapply(func_refs, function(x) x==f)
       if (T %in% checks) {
@@ -115,7 +116,6 @@ run_gibbs_sampler<-function(cond, grouping, alpha, beta, limit, logging=T, hypo_
                                 paste(state, collapse=',')))
       # Save everything for developing
       # Play with burn-in and thinning in the pred.R script
-      # For the final version do built-in burn-in and thinning here
       states[[n]]<-state 
     }
     # Go to the next iteration
