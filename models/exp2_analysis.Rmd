@@ -1,0 +1,333 @@
+---
+title: "Experiment 2 Analysis"
+author: "Bonan Zhao"
+date: "10/17/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r preamble, message=FALSE, warning=FALSE}
+# Packages
+library(tidyverse)
+library(nnet)
+
+# Data sources
+load('./exp_2/data/mturk_main.Rdata')
+load('./exp_2/data/labels.Rdata')
+load('./exp_2/data/models.Rdata')
+tasks = read.csv('./exp_2/data/tasks.csv')
+```
+
+
+# Generalization consistency
+
+For each condition we conducted Fisher's exact test on the contingency table of selecting each possible result per trial. For all four conditions, p < 0.001.
+
+
+```{r cronbach_rand, message=FALSE, warning=FALSE}
+tests = df.tw %>%
+    filter(grepl('gen',sid)) %>%
+    mutate(trial=as.numeric(substr(sid,8,9))) %>%
+    mutate(result=as.character(result)) %>%
+    select(ix, condition, trial, result) %>%
+    mutate(condition=as.factor(condition), trial=as.factor(trial), result=as.factor(result))
+
+fisher_test<-function(cond, data=tests){
+    x = data%>%filter(condition==cond)
+    return(fisher.test(table(x$trial, x$result), simulate.p.value=TRUE, B=10000))
+}
+
+fisher_test('A1')
+fisher_test('A2')
+fisher_test('A3')
+fisher_test('A4')
+```
+
+
+As with Experiment 1, we measured inter-person consistency in generalization predictions computing Cronbach's alpha for the sixteen generalization tasks per condition (excluding the two catch-trials), totalling $4 \times 16 = 64$ values.
+
+
+```{r cronbach_calc, message=FALSE, warning=FALSE}
+# Equation 13 on p.9
+KR21<-function(x) {
+  k=sum(x)
+  n=length(x)
+  p=1/n
+  rho<-(k/(k-1))*(1-(k*p*(1-p)/var(x)))
+  return(rho)
+}
+
+# Prep an example data frome
+all_objects<-c()
+for (s in 3:7) { # shape/edges, ranges 3-7
+  for (c in 1:4) { # color/shading, ranges 1-4
+    all_objects<-c(all_objects, s*10+c)
+  }
+}
+default<-expand.grid(
+  group=paste0('A',1:4), trial=1:16, object=as.character(all_objects),
+  stringsAsFactors =F)
+
+# Get contingency table in the desired format
+counts<-df.tw %>%
+  filter(phase=='gen'&grepl('gen', sid)) %>%
+  mutate(
+    group=condition,
+    trial=as.numeric(substr(sid,8,9)), 
+    object=as.character(result)) %>%
+  group_by(group, trial, object) %>%
+  summarise(count=n()) %>%
+  mutate(freq=count/sum(count)) %>%
+  ungroup() %>%
+  full_join(default, by=c('group', 'trial', 'object')) %>%
+  mutate(
+    count=ifelse(is.na(count), 0, count), 
+    freq=ifelse(is.na(freq), 0, freq),
+  ) %>%
+  arrange(group, trial, object)
+
+# Prep result data frame - 4*16=64 taskwise Cronbach's alpha values
+consistency<-expand.grid(condition=paste0('A',1:4), trial=1:16, stringsAsFactors = F) %>% 
+  arrange(condition, trial)
+
+for (i in 1:nrow(consistency)) {
+  cond=consistency[i,'condition']
+  tid=consistency[i, 'trial']
+  count_vec<-filter(counts, group==cond, trial==tid) %>% pull(count)
+  consistency[i, 'cronbach_alpha'] = KR21(count_vec)
+}
+
+# Add condition info
+cond_info <- labels %>% 
+  select(condition, fix, fix_cond, rule_change, rule_change_cond) %>%
+  distinct()
+# Below is the one we will be using for further analysis
+gen_labeled <- consistency %>%
+  left_join(cond_info, by=c('condition'))
+
+```
+
+
+
+
+We first compared inter-person generalization consistency by condition.
+
+```{r cronbach_cond_plot, message=FALSE, warning=FALSE}
+gen_labeled %>%
+  mutate(rule_change_cond=ifelse(rule_change_cond=='Rule edge(A)', 'Rule 1', 'Rule 2')) %>%
+  ggplot(aes(x=rule_change_cond, y=cronbach_alpha, fill=condition)) +
+  geom_violin() +
+  geom_boxplot(width=0.3) +
+  stat_summary(fun=mean, geom="point", shape=20, size=4, color="black", fill="black") + 
+  facet_grid(~fix_cond, switch = "x", scales = "free_x", space = "free_x") +
+  # formatting
+  theme(panel.spacing = unit(0, "lines"), 
+        strip.background = element_blank(),
+        strip.placement = "outside",
+        legend.position = "none") +
+  labs(x='', y='', title='') +
+  scale_x_discrete(position = "top") +
+  scale_fill_brewer(palette="Paired")
+
+# Test linear models
+lm(cronbach_alpha~fix+rule_change, data=gen_labeled) %>% summary
+lm(cronbach_alpha~fix+rule_change+fix:rule_change, data=gen_labeled) %>% summary
+
+```
+
+
+
+
+We found that generalization consistency decreased as objects in the generalization tasks become more distinct from those in the learning examples.
+To show this, we constructed a rough measure of *dissimilarity*, by counting the features of generalization trials that took novel values never observed in the learning phase.
+See Section "Generalization Consistency" for Experiment 2 on page 16.
+
+
+```{r cronbach_diff, message=FALSE, warning=FALSE}
+get_stone_overlaps<-function(vec_a, vec_b) {
+  appeared_shades<-unique(vec_a%%10)
+  appeared_edges<-unique(floor(vec_a/10))
+  tasked_shades<-unique(vec_b%%10)
+  tasked_edges<-unique(floor(vec_b/10))
+  return(2-max(tasked_edges %in% appeared_edges)-max(tasked_shades %in% appeared_shades))
+}
+
+for (i in 1:nrow(gen_labeled)) {
+  cond=gen_labeled[i, 'condition']
+  tid=gen_labeled[i, 'trial']
+  agent=filter(tasks, phase=='gen', condition==cond, task==tid) %>% pull(agent)
+  recipient=filter(tasks, phase=='gen', condition==cond, task==tid) %>% pull(recipient)
+  all_tasked<-c(agent, recipient) %>% unique()
+  # Get learning data
+  learn_agents<-filter(tasks, phase=='learn', condition==cond) %>% pull(agent) %>% unique()
+  learn_recipient<-filter(tasks, phase=='learn', condition==cond) %>% pull(recipient) %>% unique()
+  all_appeared<-c(learn_agents, learn_recipient) %>% unique()
+  # calculate different measurements
+  gen_labeled[i, 'agent_diff']<-get_stone_overlaps(learn_agents, agent)
+  gen_labeled[i, 'recipient_diff']<-get_stone_overlaps(learn_recipient, recipient)
+  gen_labeled[i, 'fixed_diff']<-ifelse(cond %in% c('A1', 'A3'), gen_labeled[i, 'agent_diff'], gen_labeled[i, 'recipient_diff'])
+  gen_labeled[i, 'varied_diff']<-ifelse(cond %in% c('A1', 'A3'), gen_labeled[i, 'recipient_diff'], gen_labeled[i, 'agent_diff'])
+}
+
+gen_labeled$total_diff<-gen_labeled$fixed_diff+gen_labeled$varied_diff
+
+# Plot Cronbach alpha's changes with dissimilarity
+gen_labeled %>%
+  mutate(condition=gsub('A', 'B', condition)) %>%
+  ggplot(aes(x=total_diff, y=cronbach_alpha, shape=condition, color=condition)) +
+  geom_point(size=2) +
+  geom_smooth(method = "lm", fill=NA) +
+  scale_color_brewer(palette="Paired") +
+  labs(x='Dissimilarity', y='', title='') +
+  theme(legend.title = element_blank(),
+        legend.position="top") 
+
+# Test with linear regression
+lm(cronbach_alpha~total_diff, data=gen_labeled) %>% summary()
+
+# Take conditions into account
+lm(cronbach_alpha~total_diff+fix+rule_change, gen_labeled) %>% summary()
+
+```
+
+
+
+
+Not only did the evidence-balance condition have a significant effect on generalization consistency, dissimilarity of the agent or recipient objects in the generalization tasks was also associated with lower consistency.
+Holding recipient dissimilarity constant,
+increasing agent dissimilarity does not predict prediction consistency significantly.
+However, recipient dissimilarity does.
+
+```{r cronbach_roles, message=FALSE, warning=FALSE}
+lm(cronbach_alpha~agent_diff, gen_labeled) %>% summary()
+lm(cronbach_alpha~recipient_diff, gen_labeled) %>% summary()
+```
+
+
+# Self-reports
+
+Since our ground truths are not the only rules consistent with the learning data, we analyzed participant self-reports not according to whether they got the ground truths right, but whether their own rules were consistent with the learning data, as well as the level of generality in the reports.
+Hence, we first defined three exclusive and exhaustive response specificity categories: *specific*, *fuzzy*, and *tacit*. 
+See section "Self-reports" for Experiment 2, pp.17-18.
+
+```{r labels, message=FALSE, warning=FALSE}
+ggplot(comp_data, aes(x=rule_change_cond, fill=rule_type)) + 
+  geom_bar(stat="count", position="fill") +
+  facet_grid(~fix_cond, switch = "x", scales = "free_x", space = "free_x") +
+  theme(panel.spacing = unit(0, "lines"), 
+        strip.background = element_blank(),
+        strip.placement = "outside") +
+  labs(x='', y='', title='Prediction specification') +
+  theme(legend.title = element_blank(), legend.position = 'bottom') +
+  scale_fill_brewer(palette="Paired")
+
+# Test with multinom
+comp_data$rule_type_2 <- relevel(comp_data$rule_type_2, ref = "specific")
+test <- multinom(rule_type_2 ~ fix + rule_change, data = comp_data)
+z <- summary(test)$coefficients/summary(test)$standard.errors
+(1 - pnorm(abs(z), 0, 1)) * 2
+
+```
+
+We also had the coders categorize responses according to whether and how a self-report localized the domain of the causal law asserted.
+Concretely, we included four labels *A* (agent-only), *R* (recipient-only), *AR* (both), and *universal* (no localization).
+See section "Self-reports" for Experiment 2, pp.17-18.
+
+
+```{r locals, message=FALSE, warning=FALSE}
+ggplot(comp_data, aes(x=rule_change_cond, fill=categorization)) + 
+  geom_bar(stat="count", position="fill") +
+  facet_grid(~fix_cond, switch = "x", scales = "free_x", space = "free_x") +
+  theme(panel.spacing = unit(0, "lines"), 
+        strip.background = element_blank(),
+        strip.placement = "outside") +
+  labs(x='', y='', title='Causal law localization') +
+  theme(legend.title = element_blank(), legend.position = 'bottom') +
+  scale_fill_brewer(palette="Paired")
+
+# Test localization with GLM
+glm(categorization=='universal' ~ fix + rule_change, 
+    data=comp_data, family='binomial') %>% summary() 
+glm(categorization=='universal' ~ fix + rule_change + fix:rule_change, 
+    data=comp_data, family='binomial') %>% summary() 
+```
+
+
+
+# Model comparison
+
+See `./exp_2` folder for model implementations, optimized parameters, and BIC values.
+
+Mturk data:
+
+```{r plot_mturk, message=FALSE, warning=FALSE}
+# Prep desired format
+all_results<-c()
+for (e in 3:7) {
+  for (s in 1:4) {
+    all_results<-c(all_results, e*10+s)
+  }
+}
+default<-expand.grid(condition=paste0('B', seq(4)), trial=seq(16), result=all_results)
+default$condition<-as.character(default$condition)
+
+# Format mturk behavioral data
+beh<-df.tw %>%
+  filter(phase=='gen'&grepl('gen', sid)) %>%
+  mutate(trial=as.numeric(substr(sid,8,9)),
+         condition=paste0('B',substr(condition,2,2))) %>%
+  select(ix, condition, trial, result) %>%
+  arrange(condition, trial) %>%
+  group_by(condition, trial, result) %>%
+  summarise(count=n()) %>%
+  ungroup() %>%
+  right_join(default, by=c('condition', 'trial', 'result')) %>%
+  mutate(count=replace_na(count, 0)) %>%
+  group_by(condition, trial, result) %>%
+  summarise(n = sum(count)) %>%
+  mutate(freq = n / sum(n), 
+         result=as.character(result), 
+         data='mturk',
+         ) %>%
+  select(condition, trial, result, prob=freq, data)
+
+# Plot heatmap
+ggplot(beh, aes(x=result, y=trial, fill=prob)) + geom_tile() + 
+  labs(x='object', y='task') +
+  scale_y_continuous(trans="reverse", breaks=1:16) + 
+  scale_fill_gradient(low='white', high='#293352') +
+  facet_grid(~condition) +
+  theme_bw()
+```
+
+And the best fit LoCaLa model:
+
+```{r plot_locala, message=FALSE, warning=FALSE}
+# Prep data
+locala<-model.proc %>%
+  mutate(condition=paste0('B',substr(group,2,2)), result=object, data='LoCaLa') %>%
+  select(condition, trial, result, prob=prob_s, data)
+
+# Plot heatmap
+ggplot(locala, aes(x=result, y=trial, fill=prob)) + geom_tile() + 
+  labs(x='object', y='task') +
+  scale_y_continuous(trans="reverse", breaks=1:16) + 
+  scale_fill_gradient(low='white', high='#293352') +
+  facet_grid(~condition) +
+  theme_bw()
+
+```
+
+
+
+
+
+
+
+
+
+
+
