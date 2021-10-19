@@ -12,7 +12,7 @@ knitr::opts_chunk$set(echo = TRUE)
 ```{r preamble, message=FALSE, warning=FALSE}
 # Packages
 library(tidyverse)
-library(nnet)
+library(nnet) # For multinomial logistic regression
 
 # Data sources
 load('./exp_2/data/mturk_main.Rdata')
@@ -131,6 +131,12 @@ gen_labeled %>%
   labs(x='', y='', title='') +
   scale_x_discrete(position = "top") +
   scale_fill_brewer(palette="Paired")
+
+# Compare fixed-role condition
+t.test((filter(gen_labeled, fix=='A'))$cronbach_alpha, (filter(gen_labeled, fix=='R'))$cronbach_alpha, paired = T)
+
+# Compare evidence-balance condition
+t.test((filter(gen_labeled,  rule_change=='edge'))$cronbach_alpha, (filter(gen_labeled,  rule_change=='shade'))$cronbach_alpha, paired = T)
 
 # Test linear models
 lm(cronbach_alpha~fix+rule_change, data=gen_labeled) %>% summary
