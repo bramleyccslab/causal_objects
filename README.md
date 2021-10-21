@@ -87,7 +87,7 @@ R scripts are named in self-explanatory manner:
 * Scripts named after each model, e.g., `model_uncala.R`, implement the corresponding model
 * Shared helper functions can be found in the `shared.R` script for Experiment 1, and the `functions/` folder for Experiment 2
 
-Code are commented with corresponding sections, equations and line numbers in the manuscript. Line numbers may vary slightly.
+Code are commented with corresponding sections, equations and line numbers in the manuscript. Line numbers may vary.
 
 ## Resources
 
