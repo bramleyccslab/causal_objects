@@ -4,7 +4,7 @@
 
 ### Manuscript
 
-How do people generalize causal relations over objects? A non-parametric Bayesian account (in revision, [preprint on PsyArXiv](https://psyarxiv.com/x57hf/))
+How do people generalize causal relations over objects? A non-parametric Bayesian account (under revision, [preprint on PsyArXiv](https://psyarxiv.com/x57hf/))
 
 ### Authors
 
