@@ -73,7 +73,7 @@ The `behavioral_data` folder contains full datasets for both experiments, in CSV
 * The `*_trials.csv` files are generalization predictions from each participant (column `ix`) for each task (colum `trial`)
 * For Experiment 1, objects are coded by color (b: blue, r: red, y: yellow) and shape (c: circle, d: diamond s:square). There are 3 * 3 = 9 objects in total: bc, br, ..., ys
 * For Experiment 2, objects are coded by edges (3-7, on the tens-digit) and shading (1-4, on the ones-digit). There are 5 * 4 = 20 objects in total: 31, 32, ..., 47
-* Experiment 2 has an extra responses CSV that contains the full set of participants free responses and coders labels
+* Experiment 2 has an extra responses CSV that contains the full set of participants free responses and coded labels
 
 ## Plots and stats
 
@@ -85,7 +85,7 @@ R scripts are named in self-explanatory manner:
 
 * `PCFG.R` scripts implement the generative grammars for each experiment
 * Scripts named after each model, e.g., `model_uncala.R`, implement the corresponding model
-* Shared helper functions are reused by the `shared.R` script for Experiment 1 and the `functions/` folder for Experiment 2
+* Shared helper functions can be found in the `shared.R` script for Experiment 1, and the `functions/` folder for Experiment 2
 
 Code are commented with corresponding sections, equations and line numbers in the manuscript. Line numbers may vary slightly.
 
